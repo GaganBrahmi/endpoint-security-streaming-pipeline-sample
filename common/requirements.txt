@@ -1,0 +1,18 @@
+# Endpoint Security Streaming Pipeline
+# Additional dependencies beyond main requirements.txt
+
+# Kafka client for Lambda producer
+kafka-python>=2.0.2
+
+# PySpark with Kafka integration (already in main requirements.txt)
+# pyspark>=3.4.0
+
+# Iceberg Spark runtime (add to spark-submit --packages)
+# org.apache.iceberg:iceberg-spark-runtime-3.4_2.12:1.4.0
+# org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.0
+
+# AWS SDK (already in main requirements.txt)
+# boto3>=1.28.0
+
+# For local testing and development
+python-dotenv>=1.0.0
