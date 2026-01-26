@@ -1,0 +1,3 @@
+# PyFlink and Dependencies for Amazon Managed Service for Apache Flink
+apache-flink==1.18.0
+

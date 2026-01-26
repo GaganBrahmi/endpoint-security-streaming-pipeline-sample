@@ -1,0 +1,31 @@
+[
+    {
+    "PropertyGroupId": "kinesis.analytics.flink.run.options",
+    "PropertyMap": {
+      "python": "flink_consumer_with_aggregations.py",
+      "jarfile": "lib/pyflink-dependencies.jar",
+      "pyFiles": "aggregation_config.py,table_creators.py,aggregation_jobs.py"
+    }
+  },
+  {
+    "PropertyGroupId": "consumer.config.0",
+    "PropertyMap": {
+      "kafka.bootstrap.servers": "b-1.democluster.abcxyz.a12.kafka.us-east-1.amazonaws.com:9092,b-2.democluster.abcxyz.a12.kafka.us-east-1.amazonaws.com:9092",
+      "kafka.topic.name": "endpoint_logs",
+      "kafka.consumer.group.id": "flink-endpoint-consumer",
+      "warehouse.path": "s3://your-bucket/path/to/iceberg/data/warehouse",
+      "catalog.name": "glue_catalog",
+      "database.name": "my_database",
+      "table.name": "endpoint_data_flink",
+      "aws.region": "us-east-1",
+      "enable.raw.events": "true",
+      "enable.tumbling.windows": "true",
+      "enable.sliding.windows": "true",
+      "enable.session.windows": "true",
+      "tumbling.window.minutes": "5,15,30,60",
+      "sliding.window.size.minutes": "5",
+      "sliding.window.slide.minutes": "1",
+      "session.gap.minutes": "5"
+    }
+  }
+]
