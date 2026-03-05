@@ -1,221 +1,147 @@
-# Common Ingestion Components
+# Common Infrastructure — MSK Serverless + Lambda Data Generator
 
-This directory contains shared components for ingesting endpoint security events into Kafka. These components are used by all streaming processing engines (Spark, Flink, etc.).
+Shared ingestion layer used by all three stream processing consumers (Flink, Spark S3, Spark S3 Tables). Deploys an MSK Serverless cluster and a Lambda function that generates fake endpoint security events and publishes them to Kafka.
 
-## ⚠️ Security Notice
+## Architecture
 
-**This code uses unauthenticated/plaintext Kafka connections for demonstration purposes.**
+![Common Infrastructure Architecture](images/common_architecture.png)
 
-For production use, implement proper Kafka security:
-- **Authentication**: SASL/SCRAM, SASL/PLAIN, or IAM (for Amazon MSK)
-- **Encryption**: SSL/TLS for data in transit
-- **Authorization**: Kafka ACLs for topic-level access control
+```
+Lambda Data Generator → MSK Serverless (Kafka, IAM auth, port 9098) → Consumer (Flink / Spark)
+```
 
-See the main [README.md](../README.md) for production security configuration examples.
+## Directory Structure
+
+```
+common/
+├── images/                          # Architecture diagrams
+│   └── common_architecture.png
+├── cdk/                             # CDK infrastructure code
+│   ├── app.py                       # CDK app entry point (controls which stacks deploy)
+│   ├── msk_stack.py                 # MSK Serverless cluster stack
+│   ├── lambda_stack.py              # Lambda data generator stack
+│   ├── cdk.json                     # CDK configuration
+│   └── requirements.txt             # CDK Python dependencies
+├── lambda_function/                 # Lambda function source code
+│   ├── lambda_data_generator.py     # FakeDataGenerator + Kafka publisher (main)
+│   └── msk_data_generator.py        # MSK-specific data generator variant
+├── scripts/                         # Deployment and operational scripts
+│   ├── deploy_msk.sh                # Deploy MSK Serverless cluster
+│   ├── deploy_lambda.sh             # Deploy Lambda data generator
+│   ├── generate_data.sh             # Invoke Lambda to generate events
+│   ├── cleanup_msk.sh               # Destroy MSK stack
+│   └── cleanup_lambda.sh            # Destroy Lambda stack
+├── sample_events.json               # Example event payloads for reference
+├── requirements.txt                 # Python dependencies
+└── README.md
+```
 
 ## Components
 
-### 1. Lambda Producer (`lambda_producer.py`)
-AWS Lambda function that receives **real** endpoint security events and publishes them to Kafka.
+| Component | Stack Name | Description |
+|---|---|---|
+| MSK Serverless | `MSKStack` | Kafka cluster with IAM authentication, requires 2+ subnets in different AZs |
+| Lambda Data Generator | `LambdaDataGenStack` | Generates fake endpoint security events, publishes to Kafka topic `endpoint_logs` |
 
-**Use Case:** Production deployment where real endpoint agents send events
+## Scripts
 
-### 2. Lambda Data Generator (`lambda_data_generator.py`)
-AWS Lambda function that **generates fake** endpoint security events for testing and demos.
+All scripts are in `scripts/` and should be run from the `common/` directory or via the root-level combined deploy scripts.
 
-**Use Case:** Testing, demos, load testing, and development without real endpoint agents
-
-### 3. Deployment Scripts
-- `deploy_lambda.sh` - Deploy the real event producer
-- `deploy_data_generator.sh` - Deploy the fake event generator
-
-### 4. Sample Data
-- `sample_events.json` - Example endpoint security events for testing
+| Script | Description |
+|---|---|
+| `scripts/deploy_msk.sh` | Deploy MSK Serverless cluster. Requires `VPC_ID` and `SUBNET_IDS` env vars. Outputs saved to `.env.msk` |
+| `scripts/deploy_lambda.sh` | Deploy Lambda data generator. Reads MSK config from `.env.msk`. Outputs saved to `.env.lambda` |
+| `scripts/generate_data.sh` | Invoke Lambda to generate events. Usage: `./scripts/generate_data.sh [count]` (default: 1 invocation) |
+| `scripts/cleanup_msk.sh` | Destroy MSK stack and remove `.env.msk` |
+| `scripts/cleanup_lambda.sh` | Destroy Lambda stack and remove `.env.lambda` |
 
 ## Prerequisites
 
-### AWS Services
-- S3 bucket for data storage
-- AWS Glue Data Catalog database
-- Kafka cluster (MSK, self-managed, or local)
-- Topic: `endpoint_logs` created
+- AWS CLI configured
+- Python 3.9+
+- AWS CDK
+- Environment variables set:
+  ```bash
+  export VPC_ID=vpc-xxxxxxxx
+  export SUBNET_IDS=subnet-aaa,subnet-bbb   # At least 2 subnets in different AZs
+  ```
 
-### Dependencies
+## Deploy
+
 ```bash
-pip install -r requirements.txt
+# Step 1: Deploy MSK
+./scripts/deploy_msk.sh
+
+# Step 2: Deploy Lambda (reads .env.msk)
+./scripts/deploy_lambda.sh
 ```
 
-## IAM Role Setup
-
-Before deploying Lambda functions, create an IAM execution role with appropriate permissions.
-
-### Option 1: Lambda WITHOUT VPC (Public Kafka or Local Testing)
-
+Or use the root-level combined scripts which handle this automatically:
 ```bash
-# Create the role
-aws iam create-role \
-  --role-name lambda-endpoint-logs-role \
-  --assume-role-policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Principal": {"Service": "lambda.amazonaws.com"},
-      "Action": "sts:AssumeRole"
-    }]
-  }'
-
-# Attach basic execution policy (for CloudWatch Logs)
-aws iam attach-role-policy \
-  --role-name lambda-endpoint-logs-role \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-# Get the role ARN
-aws iam get-role \
-  --role-name lambda-endpoint-logs-role \
-  --query 'Role.Arn' \
-  --output text
+cd ..
+./deploy_flink.sh      # Deploys MSK + Lambda + Flink
+./deploy_spark_s3.sh   # Deploys MSK + Lambda + Spark (S3)
 ```
 
-### Option 2: Lambda WITH VPC (For MSK in VPC)
+## Generate Data
 
 ```bash
-# Create the role
-aws iam create-role \
-  --role-name lambda-msk-execution-role \
-  --assume-role-policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Effect": "Allow",
-      "Principal": {"Service": "lambda.amazonaws.com"},
-      "Action": "sts:AssumeRole"
-    }]
-  }'
+# Single invocation (100 events)
+./scripts/generate_data.sh
 
-# Attach basic execution policy
-aws iam attach-role-policy \
-  --role-name lambda-msk-execution-role \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-# Attach VPC access policy
-aws iam attach-role-policy \
-  --role-name lambda-msk-execution-role \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-
-# Get the role ARN
-aws iam get-role \
-  --role-name lambda-msk-execution-role \
-  --query 'Role.Arn' \
-  --output text
-```
-
-## Configuration
-
-### Lambda Producer Setup (Real Events)
-
-**Edit Configuration in `deploy_lambda.sh`:**
-```bash
-ROLE_ARN="arn:aws:iam::YOUR_ACCOUNT_ID:role/YOUR_LAMBDA_ROLE"
-KAFKA_BOOTSTRAP_SERVERS="your-msk-broker:9092"
-KAFKA_TOPIC="endpoint_logs"
-```
-
-**VPC Configuration (for MSK in VPC):**
-```bash
-VPC_ENABLED="true"
-VPC_SUBNET_IDS="subnet-xxxxx,subnet-yyyyy"  # Private subnets
-VPC_SECURITY_GROUP_IDS="sg-xxxxx"  # Lambda security group
-```
-
-**Deploy:**
-```bash
-./deploy_lambda.sh
-```
-
-**Test Locally:**
-```bash
-python lambda_producer.py
-```
-
-### Lambda Data Generator Setup (Fake Events)
-
-**Edit Configuration in `deploy_data_generator.sh`:**
-```bash
-ROLE_ARN="arn:aws:iam::YOUR_ACCOUNT_ID:role/YOUR_LAMBDA_ROLE"
-KAFKA_BOOTSTRAP_SERVERS="your-msk-broker:9092"
-KAFKA_TOPIC="endpoint_logs"
-NUM_EVENTS=100
-NUM_CUSTOMERS=5
-NUM_TENANTS=3
-```
-
-**VPC Configuration (for MSK in VPC):**
-```bash
-VPC_ENABLED="true"
-VPC_SUBNET_IDS="subnet-xxxxx,subnet-yyyyy"
-VPC_SECURITY_GROUP_IDS="sg-xxxxx"
-```
-
-**Deploy:**
-```bash
-./deploy_data_generator.sh
-```
-
-**Test Locally:**
-```bash
-python lambda_data_generator.py
+# 10 invocations
+./scripts/generate_data.sh 10
 ```
 
 ## Event Schema
 
-```json
-{
-  "customer_id": "cust_12345",
-  "tenant_id": "tenant_abc",
-  "device_id": "device_xyz",
-  "device_name": "LAPTOP-001",
-  "device_type": "laptop",
-  "event_type": "file_access",
-  "event_category": "security",
-  "severity": "HIGH",
-  "timestamp": "2024-01-16T10:30:00Z",
-  "user": "john.doe@company.com",
-  "process_name": "chrome.exe",
-  "file_path": "/etc/passwd",
-  "action": "read",
-  "result": "blocked",
-  "ip_address": "192.168.1.100",
-  "os": "Windows 10",
-  "os_version": "10.0.19045",
-  "threat_detected": true,
-  "threat_type": "unauthorized_access"
-}
+Each generated event has 23 fields (20 base + 3 enrichment metadata). The schema is defined in `FakeDataGenerator` class in `lambda_function/lambda_data_generator.py`.
+
+| Field | Type | Description |
+|---|---|---|
+| event_id | string | Unique ID (e.g. `evt_1709500000_1`) |
+| customer_id | string | Customer identifier (e.g. `cust_00001`) |
+| tenant_id | string | Tenant identifier (e.g. `tenant_a`) |
+| device_id | string | Device identifier (e.g. `device_4521`) |
+| device_name | string | Device name (e.g. `LAPTOP-JOHN-042`) |
+| device_type | string | laptop, desktop, server, tablet, mobile |
+| event_type | string | 14 types: file_access, network_connection, malware_detection, etc. |
+| event_category | string | Always `"security"` |
+| severity | string | LOW, MEDIUM, HIGH, CRITICAL |
+| timestamp | string | ISO 8601 format `yyyy-MM-ddTHH:mm:ssZ` |
+| user | string | Email format (e.g. `john.doe@company.com`) |
+| process_name | string | Process name (e.g. `chrome.exe`, `powershell.exe`) |
+| file_path | string | File path (null for non-file events) |
+| action | string | read, write, execute, delete, modify, connect, upload, download, install, encrypt |
+| result | string | allowed, blocked, quarantined |
+| ip_address | string | Random private IP |
+| os | string | Windows 10/11, macOS, Ubuntu, iOS, Android |
+| os_version | string | Version string matching the OS |
+| threat_detected | boolean | Probability scales with severity |
+| threat_type | string | 10 types when threat_detected=true, null otherwise |
+| ingestion_timestamp | string | ISO timestamp (enrichment) |
+| source | string | Always `"lambda_data_generator"` |
+| version | string | Always `"1.0"` |
+
+## Environment Files
+
+| File | Created By | Contents |
+|---|---|---|
+| `.env.msk` | `deploy_msk.sh` | `MSK_CLUSTER_ARN`, `MSK_SECURITY_GROUP_ID`, `KAFKA_BOOTSTRAP_SERVERS`, `VPC_ID`, `SUBNET_IDS` |
+| `.env.lambda` | `deploy_lambda.sh` | `LAMBDA_FUNCTION`, `KAFKA_TOPIC` |
+
+These files are read by all consumer deploy scripts to connect to the shared MSK cluster.
+
+## Cleanup
+
+```bash
+# Cleanup Lambda first, then MSK
+./scripts/cleanup_lambda.sh
+./scripts/cleanup_msk.sh
 ```
 
-## Next Steps
+## CDK Stacks
 
-After setting up ingestion, choose a stream processing engine:
-
-- **Spark Streaming**: See [../spark-streaming/README.md](../spark-streaming/README.md)
-- **Flink Streaming**: See [../flink-streaming/README.md](../flink-streaming/README.md)
-
-## Monitoring
-
-### CloudWatch Metrics
-- Lambda invocations and errors
-- Kafka producer metrics
-
-### Logging
-- Lambda logs in CloudWatch
-- Check for Kafka connection errors
-
-## Troubleshooting
-
-### Kafka Connection Failed
-- Verify bootstrap servers address
-- Check security group rules (if using VPC)
-- Ensure Kafka topic exists
-
-### Lambda Timeout
-- Increase Lambda timeout setting
-- Optimize batch size
-- Check Kafka broker connectivity
+The CDK app in `cdk/` contains two stacks controlled by context flags:
+- `deploy_msk=true` → deploys `MSKStack`
+- `deploy_lambda=true` → deploys `LambdaDataGenStack`

@@ -7,13 +7,18 @@
     </formats>
     <includeBaseDirectory>false</includeBaseDirectory>
     <fileSets>
-        <!-- Includes any Python file from the project directory and down, recursively -->
+        <!-- Includes Python files from the project directory, excluding non-runtime dirs -->
         <fileSet>
             <directory>${project.basedir}</directory>
             <outputDirectory>/</outputDirectory>
             <includes>
                 <include>**/*.py</include>
             </includes>
+            <excludes>
+                <exclude>cdk/**</exclude>
+                <exclude>scripts/**</exclude>
+                <exclude>target/**</exclude>
+            </excludes>
         </fileSet>
         <fileSet>
             <directory>${project.build.directory}</directory>

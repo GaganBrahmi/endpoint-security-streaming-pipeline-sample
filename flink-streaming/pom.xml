@@ -75,11 +75,23 @@
             <version>${flink.version}</version>
         </dependency>
 
-        <!-- Flink Kafka Connector -->
+        <!-- Flink Kafka Connector (non-shaded) + Kafka clients -->
         <dependency>
             <groupId>org.apache.flink</groupId>
-            <artifactId>flink-sql-connector-kafka</artifactId>
+            <artifactId>flink-connector-kafka</artifactId>
             <version>${kafka.version}-${flink.major.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>${kafka.version}</version>
+        </dependency>
+
+        <!-- MSK IAM Auth for Kafka (SASL/OAUTHBEARER with AWS IAM) -->
+        <dependency>
+            <groupId>software.amazon.msk</groupId>
+            <artifactId>aws-msk-iam-auth</artifactId>
+            <version>2.3.0</version>
         </dependency>
     </dependencies>
 

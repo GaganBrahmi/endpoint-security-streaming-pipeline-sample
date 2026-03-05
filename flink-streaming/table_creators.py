@@ -19,15 +19,13 @@ def create_kafka_source_table(
 ):
     """
     Create Kafka source table for consuming endpoint security events.
-    
-    Args:
-        table_env: PyFlink TableEnvironment
-        kafka_bootstrap_servers: Kafka broker addresses
-        kafka_topic: Kafka topic name
-        kafka_group_id: Kafka consumer group ID
+
+    Defines both event_time (from JSON timestamp) and proc_time (processing time).
+    The proc_time attribute is used for windowed aggregations to avoid watermark
+    issues, while event_time is preserved for raw event storage.
     """
     logger.info(f"Creating Kafka source table for topic: {kafka_topic}")
-    
+
     kafka_ddl = f"""
         CREATE TABLE kafka_source (
             event_id STRING,
@@ -54,21 +52,25 @@ def create_kafka_source_table(
             `source` STRING,
             `version` STRING,
             event_time AS TO_TIMESTAMP(`timestamp`, 'yyyy-MM-dd''T''HH:mm:ss''Z'''),
-            WATERMARK FOR event_time AS event_time - INTERVAL '5' SECOND
+            proc_time AS PROCTIME()
         ) WITH (
             'connector' = 'kafka',
             'topic' = '{kafka_topic}',
             'properties.bootstrap.servers' = '{kafka_bootstrap_servers}',
             'properties.group.id' = '{kafka_group_id}',
-            'scan.startup.mode' = 'latest-offset',
+            'properties.security.protocol' = 'SASL_SSL',
+            'properties.sasl.mechanism' = 'AWS_MSK_IAM',
+            'properties.sasl.jaas.config' = 'software.amazon.msk.auth.iam.IAMLoginModule required;',
+            'properties.sasl.client.callback.handler.class' = 'software.amazon.msk.auth.iam.IAMClientCallbackHandler',
+            'scan.startup.mode' = 'earliest-offset',
             'format' = 'json',
             'json.fail-on-missing-field' = 'false',
             'json.ignore-parse-errors' = 'true'
         )
     """
-    
+
     table_env.execute_sql(kafka_ddl)
-    logger.info("✅ Kafka source table created")
+    logger.info("✅ Kafka source table created (with proc_time for windowing)")
 
 
 def create_iceberg_catalog(
@@ -193,14 +195,21 @@ def create_aggregation_table(
 ):
     """
     Create Iceberg table for storing aggregated threat metrics.
-    
+
+    Uses append mode (no upsert) because TVF window aggregations emit
+    append-only INSERT rows — one per window when it closes.
+    Upsert mode requires changelog semantics which windows don't produce.
+
     Args:
         table_env: PyFlink TableEnvironment
         table_name: Table name for aggregations
         window_type: Type of window ('tumbling', 'sliding', 'session')
     """
     logger.info(f"Creating {window_type} aggregation table: {table_name}")
-    
+
+    # Drop existing table to ensure schema matches (e.g., after switching from upsert to append)
+    table_env.execute_sql(f"DROP TABLE IF EXISTS {table_name}")
+
     # Base columns for all aggregation types
     base_columns = """
         customer_id STRING,
@@ -222,7 +231,7 @@ def create_aggregation_table(
         malware_count BIGINT,
         data_exfiltration_count BIGINT
     """
-    
+
     # Add window-specific columns
     if window_type == 'tumbling':
         specific_columns = ",\n        window_duration_minutes INT"
@@ -230,17 +239,16 @@ def create_aggregation_table(
         specific_columns = ",\n        window_duration_minutes INT,\n        slide_interval_minutes INT"
     else:  # session
         specific_columns = ",\n        session_duration_seconds BIGINT,\n        event_burst_detected BOOLEAN"
-    
+
     iceberg_ddl = f"""
         CREATE TABLE IF NOT EXISTS {table_name} (
-            {base_columns}{specific_columns},
-            PRIMARY KEY (customer_id, device_id, window_start) NOT ENFORCED
+            {base_columns}{specific_columns}
         ) PARTITIONED BY (customer_id)
         WITH (
             'format-version' = '2',
-            'write.upsert.enabled' = 'true'
+            'write.upsert.enabled' = 'false'
         )
     """
-    
+
     table_env.execute_sql(iceberg_ddl)
-    logger.info(f"✅ {window_type.capitalize()} aggregation table '{table_name}' created")
+    logger.info(f"✅ {window_type.capitalize()} aggregation table '{table_name}' created (append mode)")

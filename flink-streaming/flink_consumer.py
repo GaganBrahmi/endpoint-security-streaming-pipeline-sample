@@ -163,7 +163,7 @@ def create_kafka_source_table(table_env: TableEnvironment):
             'topic' = '{kafka_topic_name}',
             'properties.bootstrap.servers' = '{kafka_bootstrap_servers}',
             'properties.group.id' = '{kafka_consumer_group_id}',
-            'scan.startup.mode' = 'latest-offset',
+            'scan.startup.mode' = 'earliest-offset',
             'format' = 'json',
             'json.fail-on-missing-field' = 'false',
             'json.ignore-parse-errors' = 'true'

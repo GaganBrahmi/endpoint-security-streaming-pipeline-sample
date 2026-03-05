@@ -1,7 +1,23 @@
 # Lambda deployment artifacts
 lambda_package/
+lambda_layer/
 lambda_function.zip
 response.json
+
+# Maven build artifacts (Flink)
+**/target/
+*.jar
+*.zip
+
+# CDK generated output (contains account-specific data)
+**/cdk.out/
+**/cdk.context.json
+**/.cdk.staging/
+
+# Environment files (deployment-specific)
+.env
+.env.msk
+.env.lambda
 
 # Python
 __pycache__/
